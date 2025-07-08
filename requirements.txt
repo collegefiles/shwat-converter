@@ -1,2 +1,2 @@
 streamlit
-pyrebase4
+firebase-admin
