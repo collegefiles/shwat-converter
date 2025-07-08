@@ -1,26 +1,29 @@
 import streamlit as st
-import pyrebase
+import firebase_admin
+from firebase_admin import credentials, db
 import os
 import uuid
 import io
+import json
 
 # --- CONFIGURATION ---
 ENCRYPTION_KEY = b'SGWATMODDERSECRETKEY'
 
-firebase_config = {
-    "apiKey": "AIzaSyAe9HSedJRzbc1PLvDU4kL2Mh_Sprg1ZpM",
-    "authDomain": "shwat-protection-sys.firebaseapp.com",
-    "databaseURL": "https://shwat-protection-sys-default-rtdb.firebaseio.com",
-    "storageBucket": "shwat-protection-sys.firebasestorage.app"
-}
-
+# --- FIREBASE INITIALIZATION using Streamlit Secrets ---
 try:
-    firebase = pyrebase.initialize_app(firebase_config)
-    db = firebase.database()
+    # Check if the app is already initialized
+    if not firebase_admin._apps:
+        # Load credentials from st.secrets
+        creds_json_str = st.secrets["firebase_credentials"]
+        creds_dict = json.loads(creds_json_str)
+        cred = credentials.Certificate(creds_dict)
+        firebase_admin.initialize_app(cred, {
+            'databaseURL': f"https://{creds_dict['project_id']}-default-rtdb.firebaseio.com"
+        })
     firebase_initialized = True
 except Exception as e:
     firebase_initialized = False
-    st.error(f"Firebase initialization failed. Check your config. Error: {e}")
+    st.error(f"Firebase initialization failed. Ensure your secrets are set correctly. Error: {e}")
 
 # --- CORE LOGIC ---
 def xor_crypt(data, key):
@@ -36,8 +39,7 @@ uploaded_file = st.file_uploader("Choose a PDF file", type="pdf")
 
 if uploaded_file is not None and firebase_initialized:
     st.success(f"File '{uploaded_file.name}' uploaded successfully.")
-    
-    # Process the file in memory
+
     pdf_data = uploaded_file.getvalue()
     encrypted_data = xor_crypt(pdf_data, ENCRYPTION_KEY)
     
@@ -47,7 +49,6 @@ if uploaded_file is not None and firebase_initialized:
     st.header("2. Download your encrypted file")
     st.info(f"The file will be downloaded as: **{shwat_filename}**")
     
-    # Use an in-memory byte stream for the download button
     encrypted_file_stream = io.BytesIO(encrypted_data)
 
     st.download_button(
@@ -57,8 +58,6 @@ if uploaded_file is not None and firebase_initialized:
        mime="application/octet-stream"
     )
 
-    # Register the file in Firebase after processing
-    # This ensures the button is ready when the user sees it
     try:
         with st.spinner('Registering file in Firebase...'):
             file_id = str(uuid.uuid4())
@@ -67,7 +66,9 @@ if uploaded_file is not None and firebase_initialized:
                 'original_name': original_filename,
                 'id': file_id
             }
-            db.child("files").child(shwat_filename.replace('.', '_')).set(file_info)
+            # Use db.reference with the official SDK
+            ref = db.reference(f"files/{shwat_filename.replace('.', '_')}")
+            ref.set(file_info)
         st.success("File successfully registered in Firebase.")
     except Exception as e:
         st.error(f"Could not register file in Firebase. Error: {e}")
